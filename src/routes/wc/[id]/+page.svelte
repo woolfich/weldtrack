@@ -11,18 +11,15 @@
   $: welderId = $page.params.id;
   $: welder = $welders.find((w) => w.id === welderId);
 
-  // Input state
   let articleInput = '';
   let quantityInput = '';
   let stage: 'article' | 'quantity' = 'article';
   let showSuggestions = false;
   let confirmedArticle = '';
 
-  // Overtime edit (только для сегодняшнего дня)
   let editingOvertime = false;
   let overtimeInput = '';
 
-  // Entry edit modal
   let editModal = false;
   let editEntry: WCEntry | null = null;
   let editQtyInput = '';
@@ -44,15 +41,12 @@
     ? [...welder.entries].sort((a, b) => b.updatedAt - a.updatedAt)
     : [];
 
-  // === Нарастающий итог переработки ===
   $: totalOvertime = welder
     ? Object.values(welder.overtime || {}).reduce((sum, hours) => sum + (hours || 0), 0)
     : 0;
 
-  // Переработка за сегодня (для редактирования)
   $: todayOvertime = welder?.overtime?.[today] ?? 0;
 
-  // Info panel data
   $: infoPlan = confirmedArticle
     ? $planItems.find((p) => p.article === confirmedArticle)
     : null;
@@ -95,12 +89,12 @@
     welders.update((list) => {
       return list.map((w) => {
         if (w.id !== welderId) return w;
-        
+
         const existingIdx = w.entries.findIndex(
           (e) => e.article === confirmedArticle && e.date === today
         );
         let newEntries: WCEntry[];
-        
+
         if (existingIdx >= 0) {
           newEntries = w.entries.map((e, i) =>
             i === existingIdx
@@ -120,33 +114,17 @@
           ];
         }
 
-        // === ЛОГИКА ПЕРЕРАБОТКИ С ДЕЛЬТОЙ ===
+        // Переработка за сегодня — всегда пересчитывается автоматически при добавлении записи.
+        // Ручная правка делается отдельно через saveOvertimeEdit и хранится независимо.
         const newOvertime = { ...w.overtime };
-        const manualFlags = { ...(w.overtimeManual || {}) };
-        
-        const oldOvertimeValue = w.overtime?.[today] || 0;
-        const calculatedNewValue = calcOvertime(newEntries, get(rates), today);
+        newOvertime[today] = calcOvertime(newEntries, get(rates), today);
 
-        if (manualFlags[today]) {
-          // Ручная правка: прибавляем только разницу к твоему значению
-          newOvertime[today] = oldOvertimeValue + (calculatedNewValue - oldOvertimeValue);
-        } else {
-          // Автоматический режим: берем расчет
-          newOvertime[today] = calculatedNewValue;
-        }
-
-        return { 
-          ...w, 
-          entries: newEntries, 
-          overtime: newOvertime,
-          overtimeManual: manualFlags 
-        };
+        return { ...w, entries: newEntries, overtime: newOvertime };
       });
     });
 
     planItems.update((plan) => recalcPlanCompleted(plan, get(welders)));
 
-    // Reset
     stage = 'article';
     articleInput = '';
     quantityInput = '';
@@ -200,32 +178,18 @@
     welders.update((list) =>
       list.map((w) => {
         if (w.id !== welderId) return w;
-        
+
         const newEntries = w.entries.map((e) =>
           e.id === editEntry!.id
             ? { ...e, quantity: newQty, updatedAt: Date.now() }
             : e
         );
-        
-        const newOvertime = { ...w.overtime };
-        const manualFlags = { ...(w.overtimeManual || {}) };
-        
-        const oldOvertimeValue = w.overtime?.[editDate] || 0;
-        const calculatedNewValue = calcOvertime(newEntries, get(rates), editDate);
 
-        if (manualFlags[editDate]) {
-          // Ручная правка: корректируем дельтой
-          newOvertime[editDate] = oldOvertimeValue + (calculatedNewValue - oldOvertimeValue);
-        } else {
-          newOvertime[editDate] = calculatedNewValue;
-        }
-        
-        return { 
-          ...w, 
-          entries: newEntries, 
-          overtime: newOvertime,
-          overtimeManual: manualFlags 
-        };
+        // Пересчитываем переработку за тот день
+        const newOvertime = { ...w.overtime };
+        newOvertime[editDate] = calcOvertime(newEntries, get(rates), editDate);
+
+        return { ...w, entries: newEntries, overtime: newOvertime };
       })
     );
     planItems.update((plan) => recalcPlanCompleted(plan, get(welders)));
@@ -240,37 +204,24 @@
     welders.update((list) =>
       list.map((w) => {
         if (w.id !== welderId) return w;
-        
-        const newEntries = w.entries.filter((e) => e.id !== editEntry!.id);
-        
-        const newOvertime = { ...w.overtime };
-        const manualFlags = { ...(w.overtimeManual || {}) };
-        
-        const oldOvertimeValue = w.overtime?.[entryDate] || 0;
-        const calculatedNewValue = calcOvertime(newEntries, get(rates), entryDate);
 
-        if (manualFlags[entryDate]) {
-          // Ручная правка: вычитаем ушедшую переработку из твоего значения
-          newOvertime[entryDate] = oldOvertimeValue + (calculatedNewValue - oldOvertimeValue);
-        } else {
-          newOvertime[entryDate] = calculatedNewValue;
-        }
-        
-        return { 
-          ...w, 
-          entries: newEntries, 
-          overtime: newOvertime,
-          overtimeManual: manualFlags 
-        };
+        const newEntries = w.entries.filter((e) => e.id !== editEntry!.id);
+
+        // Пересчитываем переработку за тот день
+        const newOvertime = { ...w.overtime };
+        newOvertime[entryDate] = calcOvertime(newEntries, get(rates), entryDate);
+
+        return { ...w, entries: newEntries, overtime: newOvertime };
       })
     );
 
     planItems.update((plan) => recalcPlanCompleted(plan, get(welders)));
-
     editModal = false;
     editEntry = null;
   }
 
+  // Ручная правка: просто перезаписывает значение переработки за сегодня.
+  // После этого оно живёт независимо до следующего добавления/редактирования записи.
   function startOvertimeEdit() {
     editingOvertime = true;
     overtimeInput = String(todayOvertime);
@@ -288,7 +239,6 @@
         return {
           ...w,
           overtime: { ...w.overtime, [today]: val },
-          overtimeManual: { ...(w.overtimeManual || {}), [today]: true },
         };
       })
     );
@@ -434,9 +384,9 @@
         />
       {:else}
         <div
-          style="font-size:16px;font-weight:700;color:{totalOvertime > 0 ? '#f59e0b' : '#64748b'};"
+          style="font-size:16px;font-weight:700;color:{todayOvertime > 0 ? '#f59e0b' : '#64748b'};"
         >
-          {formatQty(totalOvertime)}
+          {formatQty(todayOvertime)}
         </div>
         <div style="font-size:11px;color:#64748b;">ч</div>
       {/if}
