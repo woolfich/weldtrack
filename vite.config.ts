@@ -10,7 +10,7 @@ export default defineConfig({
       manifest: {
         name: 'WeldTrack',
         short_name: 'WeldTrack',
-        description: 'Учёт выполненных работ сварщиков',
+        description: 'Приложение для учета работы сварщиков',
         theme_color: '#1e293b',
         background_color: '#0f172a',
         display: 'standalone',
@@ -21,6 +21,7 @@ export default defineConfig({
             src: '/icons/icon-192x192.png',
             sizes: '192x192',
             type: 'image/png',
+            // Убрал purpose: 'any maskable' — оставь, только если иконки реально maskable
           },
           {
             src: '/icons/icon-512x512.png',
@@ -30,8 +31,10 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Простая конфигурация как в рабочем проекте
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
       },
+      // Помогает отлаживать PWA локально
       devOptions: {
         enabled: true,
       },
