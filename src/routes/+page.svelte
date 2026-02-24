@@ -93,7 +93,8 @@
     for (const e of welder.entries) {
       map.set(e.article, (map.get(e.article) ?? 0) + e.quantity);
     }
-    return [...map.entries()].map(([art, qty]) => `${art} ${formatQty(qty)} шт`).join('; ');
+    // Изменено: join('\n') вместо join('; ')
+    return [...map.entries()].map(([art, qty]) => `${art} ${formatQty(qty)} шт`).join('\n');
   }
 </script>
 
@@ -160,7 +161,8 @@
   <div class="modal-overlay" on:click={() => (showInfoModal = false)}>
     <div class="modal-sheet" on:click|stopPropagation>
       <h3 style="margin:0 0 16px;font-size:18px;">{infoModalWelder.lastName} — итого</h3>
-      <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;">
+      <!-- Изменено: добавлен white-space:pre-line -->
+      <p style="color:#cbd5e1;font-size:15px;line-height:1.7;margin:0;white-space:pre-line;">
         {allTimeSummary(infoModalWelder) || 'Нет записей.'}
       </p>
       <button class="btn-secondary" style="width:100%;margin-top:20px;" on:click={() => (showInfoModal = false)}>

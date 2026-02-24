@@ -6,7 +6,11 @@ const config = {
   preprocess: vitePreprocess(),
   kit: {
     adapter: adapter({
-      fallback: 'index.html',
+      pages: 'build',
+      assets: 'build',
+      fallback: 'index.html',  // Важно для SPA-роутинга!
+      precompress: false,
+      strict: true
     }),
   },
 };
