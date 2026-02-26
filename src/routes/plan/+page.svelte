@@ -172,8 +172,10 @@
           {#if item.locked}
             <span style="color:#4ade80;font-size:13px;font-weight:600;margin-right:8px;">ПЛАН ВЫПОЛНЕН</span>
           {/if}
-          <span style="color:{item.locked ? '#4ade80' : '#94a3b8'};font-size:15px;margin-right:8px;">
-            {formatQty(item.target)} / {formatQty(item.completed)}
+          <span style="font-size:15px;margin-right:8px;">
+            <span style="color:#94a3b8;">{formatQty(item.target)}</span>
+            <span style="color:#64748b;"> / </span>
+            <span style="color:#fbbf24;font-weight:600;">{formatQty(item.completed)}</span>
           </span>
           <button
             class="btn-secondary"
