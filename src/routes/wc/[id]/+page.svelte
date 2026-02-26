@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { welders, rates, planItems } from '$lib/stores';
   import BottomNav from '$lib/components/BottomNav.svelte';
-  import { normalizeArticle, formatQty, calcOvertime, recalcPlanCompleted, todayISO } from '$lib/utils';
+  import { normalizeArticle, formatQty, calcOvertime, calcDayHours, calcDayStats, recalcPlanCompleted, todayISO } from '$lib/utils';
   import { v4 as uuidv4 } from 'uuid';
   import { get } from 'svelte/store';
   import type { WCEntry } from '$lib/types';
@@ -37,13 +37,27 @@
       ).slice(0, 5)
     : availableArticles.slice(0, 5);
 
-  $: sortedEntries = welder
-    ? [...welder.entries].sort((a, b) => b.updatedAt - a.updatedAt)
-    : [];
+  // Группировка записей по датам, новые сверху
+  $: groupedByDate = (() => {
+    if (!welder) return [];
+    const dateMap = new Map<string, WCEntry[]>();
+    for (const entry of welder.entries) {
+      if (!dateMap.has(entry.date)) dateMap.set(entry.date, []);
+      dateMap.get(entry.date)!.push(entry);
+    }
+    const sortedDates = [...dateMap.keys()].sort((a, b) => b.localeCompare(a));
+    return sortedDates.map((date) => ({
+      date,
+      entries: dateMap.get(date)!.sort((a, b) => b.updatedAt - a.updatedAt),
+    }));
+  })();
 
-  $: totalOvertime = welder
-    ? Object.values(welder.overtime || {}).reduce((sum, hours) => sum + (hours || 0), 0)
-    : 0;
+  // Статистика по дням с учётом пула переработки (даты по возрастанию для корректного счёта)
+  $: dayStats = (() => {
+    if (!welder) return new Map();
+    const allDates = [...new Set(welder.entries.map((e) => e.date))].sort();
+    return calcDayStats(welder.entries, $rates, welder.overtime ?? {}, allDates);
+  })();
 
   $: todayOvertime = welder?.overtime?.[today] ?? 0;
 
@@ -114,8 +128,6 @@
           ];
         }
 
-        // Переработка за сегодня — всегда пересчитывается автоматически при добавлении записи.
-        // Ручная правка делается отдельно через saveOvertimeEdit и хранится независимо.
         const newOvertime = { ...w.overtime };
         newOvertime[today] = calcOvertime(newEntries, get(rates), today);
 
@@ -185,7 +197,6 @@
             : e
         );
 
-        // Пересчитываем переработку за тот день
         const newOvertime = { ...w.overtime };
         newOvertime[editDate] = calcOvertime(newEntries, get(rates), editDate);
 
@@ -207,7 +218,6 @@
 
         const newEntries = w.entries.filter((e) => e.id !== editEntry!.id);
 
-        // Пересчитываем переработку за тот день
         const newOvertime = { ...w.overtime };
         newOvertime[entryDate] = calcOvertime(newEntries, get(rates), entryDate);
 
@@ -220,8 +230,7 @@
     editEntry = null;
   }
 
-  // Ручная правка: просто перезаписывает значение переработки за сегодня.
-  // После этого оно живёт независимо до следующего добавления/редактирования записи.
+  // Ручная правка переработки за сегодня
   function startOvertimeEdit() {
     editingOvertime = true;
     overtimeInput = String(todayOvertime);
@@ -248,6 +257,12 @@
   function handleOvertimeKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') saveOvertimeEdit();
     if (e.key === 'Escape') editingOvertime = false;
+  }
+
+  function formatDateLabel(dateISO: string): string {
+    if (dateISO === today) return 'Сегодня';
+    const [y, m, d] = dateISO.split('-');
+    return `${d}.${m}.${y}`;
   }
 </script>
 
@@ -294,7 +309,6 @@
         {/if}
       </div>
     {:else}
-      <!-- Stage 2: quantity + info panel -->
       <div style="margin-bottom:8px;padding:10px;background:#0f172a;border-radius:8px;font-size:13px;color:#94a3b8;">
         {#if infoPlan}
           <strong style="color:#38bdf8;font-size:15px;">{confirmedArticle}</strong>
@@ -325,35 +339,72 @@
     {/if}
   </div>
 
-  <!-- Entries list + overtime overlay -->
+  <!-- Entries list grouped by date + overtime overlay -->
   <div style="position:relative;flex:1;overflow:hidden;">
     <div class="scroll-area" style="padding-right:90px;">
-      {#if sortedEntries.length === 0}
+      {#if groupedByDate.length === 0}
         <div class="empty-state">Нет записей. Добавьте первую.</div>
       {:else}
-        {#each sortedEntries as entry (entry.id)}
-          {@const plan = $planItems.find((p) => p.article === entry.article)}
-          <div
-            class="list-item"
-            on:click={() => tapEntry(entry)}
-            on:touchstart={() => startLongPress(entry)}
-            on:touchend={cancelLongPress}
-            on:touchcancel={cancelLongPress}
-            on:mousedown={() => startLongPress(entry)}
-            on:mouseup={cancelLongPress}
-            on:mouseleave={cancelLongPress}
-          >
-            <span
-              style="flex:1;font-weight:700;font-size:16px;{plan?.locked ? 'text-decoration:line-through;color:#64748b;' : ''}"
-            >{entry.article}{plan?.locked ? ' (план выполнен)' : ''}</span>
-            <span style="color:#94a3b8;font-size:14px;margin-right:8px;">{entry.date}</span>
-            <span style="font-size:15px;">{formatQty(entry.quantity)} шт</span>
+        {#each groupedByDate as group (group.date)}
+          {@const stats = dayStats.get(group.date)}
+          {@const normalH = stats?.normalHours ?? 0}
+          {@const overH = stats?.overtimeHours ?? 0}
+
+          <!-- Day block header with underline -->
+          <div style="
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            padding:8px 12px 6px;
+            margin-top:10px;
+            border-bottom:2px solid #334155;
+            background:#0f172a;
+            position:sticky;
+            top:0;
+            z-index:10;
+          ">
+            <!-- Дата -->
+            <span style="font-size:13px;font-weight:700;color:{group.date === today ? '#38bdf8' : '#64748b'};">
+              {formatDateLabel(group.date)}
+            </span>
+
+            <!-- Часы -->
+            <div style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;">
+              <!-- Нормальные часы (зелёный) -->
+              <span style="color:#4ade80;">{formatQty(normalH)}ч</span>
+
+              {#if overH > 0}
+                <!-- Переработка (оранжевый) -->
+                <span style="color:#94a3b8;font-size:11px;font-weight:400;">+</span>
+                <span style="color:#f59e0b;">{formatQty(overH)}ч</span>
+              {/if}
+            </div>
           </div>
+
+          <!-- Записи дня -->
+          {#each group.entries as entry (entry.id)}
+            {@const plan = $planItems.find((p) => p.article === entry.article)}
+            <div
+              class="list-item"
+              on:click={() => tapEntry(entry)}
+              on:touchstart={() => startLongPress(entry)}
+              on:touchend={cancelLongPress}
+              on:touchcancel={cancelLongPress}
+              on:mousedown={() => startLongPress(entry)}
+              on:mouseup={cancelLongPress}
+              on:mouseleave={cancelLongPress}
+            >
+              <span
+                style="flex:1;font-weight:700;font-size:16px;{plan?.locked ? 'text-decoration:line-through;color:#64748b;' : ''}"
+              >{entry.article}{plan?.locked ? ' ✓' : ''}</span>
+              <span style="font-size:15px;">{formatQty(entry.quantity)} шт</span>
+            </div>
+          {/each}
         {/each}
       {/if}
     </div>
 
-    <!-- Overtime panel -->
+    <!-- Overtime panel (сегодня) — ручное редактирование -->
     <div
       style="
         position:absolute;
