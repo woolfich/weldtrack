@@ -27,6 +27,7 @@
 
   $: today = todayISO();
 
+  // Фильтр для ВВОДА: показываем только незаблокированные (активные) планы
   $: availableArticles = $planItems
     .filter((p) => !p.locked)
     .map((p) => p.article);
@@ -53,18 +54,15 @@
   })();
 
   // Статистика по дням.
-  // Нужно включить ВСЕ рабочие дни в диапазоне (даже пустые) для правильного пула.
   $: dayStats = (() => {
     if (!welder) return new Map();
 
-    // Собираем все даты: и те, где есть записи, и все рабочие дни между ними
     const entryDates = new Set(welder.entries.map((e) => e.date));
     if (entryDates.size === 0) return new Map();
 
     const minDate = [...entryDates].sort()[0];
     const maxDate = today;
 
-    // Генерируем все дни от minDate до maxDate
     const allDates: string[] = [];
     const cur = new Date(minDate + 'T00:00:00');
     const end = new Date(maxDate + 'T00:00:00');
@@ -76,8 +74,6 @@
     return calcDayStats(welder.entries, $rates, welder.overtime ?? {}, allDates);
   })();
 
-  // Переработка для отображения в панели — берём из overtimeByDate напрямую
-  // (ручное значение или авто-расчёт за сегодня)
   $: todayOvertime = (() => {
     if (!welder) return 0;
     if (today in (welder.overtime ?? {})) return welder.overtime[today];
@@ -152,11 +148,7 @@
         }
 
         const newOvertime = { ...w.overtime };
-        // Авто-пересчёт переработки за сегодня, только если не было ручного изменения
-        // (ручное изменение = значение уже в overtimeByDate И отличается от авто)
         const autoOvertime = calcOvertime(newEntries, get(rates), today);
-        // Всегда обновляем авто, если не было ручного ввода через кнопку
-        // Ручной ввод мы определяем по флагу — упрощённо: просто пишем авто
         newOvertime[today] = autoOvertime;
 
         return { ...w, entries: newEntries, overtime: newOvertime };
@@ -258,7 +250,6 @@
     editEntry = null;
   }
 
-  // Ручная правка переработки — просто пишем значение, ничего не пересчитываем
   function startOvertimeEdit() {
     editingOvertime = true;
     overtimeInput = String(todayOvertime);
@@ -326,11 +317,13 @@
               {@const plan = $planItems.find((p) => p.article === s)}
               <div
                 class="suggestion-item"
-                style={plan?.locked ? 'opacity:0.5;text-decoration:line-through;' : ''}
+                style={plan?.locked ? 'opacity:0.7;' : ''}
                 on:mousedown={() => selectArticle(s)}
               >
                 {s}
-                {#if plan?.locked}<span style="font-size:12px;color:#f87171;"> (план выполнен)</span>{/if}
+                {#if plan?.locked}
+                  <span style="display:inline-block; width:8px; height:8px; background-color:#4ade80; border-radius:50%; margin-left:6px; vertical-align:middle;"></span>
+                {/if}
               </div>
             {/each}
           </div>
@@ -399,17 +392,14 @@
 
             <!-- Часы -->
             <div style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;">
-              <!-- Нормальные часы (зелёный) — показываем реально выполненные -->
               <span style="color:#4ade80;">{formatQty(rawH)}ч</span>
 
               {#if overH > 0}
-                <!-- Переработка (оранжевый) -->
                 <span style="color:#94a3b8;font-size:11px;font-weight:400;">+</span>
                 <span style="color:#f59e0b;">{formatQty(overH)}ч</span>
               {/if}
 
               {#if normalH > rawH && rawH < 8}
-                <!-- Показываем, сколько добавил пул (серый, информационно) -->
                 <span style="color:#94a3b8;font-size:11px;font-weight:400;">
                   (пул +{formatQty(normalH - rawH)}ч)
                 </span>
@@ -419,7 +409,15 @@
 
           <!-- Записи дня -->
           {#each group.entries as entry (entry.id)}
-            {@const plan = $planItems.find((p) => p.article === entry.article)}
+            <!-- Логика поиска ВЫПОЛНЕННОГО плана для этой конкретной записи -->
+            {@const completedPlan = $planItems.find(p => 
+              p.article === entry.article && 
+              p.locked && 
+              p.completedDate && 
+              entry.date <= p.completedDate && 
+              entry.date >= p.startDate
+            )}
+
             <div
               class="list-item"
               on:click={() => tapEntry(entry)}
@@ -430,9 +428,13 @@
               on:mouseup={cancelLongPress}
               on:mouseleave={cancelLongPress}
             >
-              <span
-                style="flex:1;font-weight:700;font-size:16px;{plan?.locked ? 'text-decoration:line-through;color:#64748b;' : ''}"
-              >{entry.article}{plan?.locked ? ' ✓' : ''}</span>
+              <span style="flex:1;font-weight:700;font-size:16px;">
+                {entry.article}
+                <!-- Если нашли выполненный план, в который попадает эта запись — рисуем точку -->
+                {#if completedPlan}
+                  <span style="display:inline-block; width:8px; height:8px; background-color:#4ade80; border-radius:50%; margin-left:6px; vertical-align:middle;"></span>
+                {/if}
+              </span>
               <span style="font-size:15px;">{formatQty(entry.quantity)} шт</span>
             </div>
           {/each}
@@ -440,7 +442,7 @@
       {/if}
     </div>
 
-    <!-- Overtime panel (сегодня) — ручное редактирование -->
+    <!-- Overtime panel (сегодня) -->
     <div
       style="
         position:absolute;
