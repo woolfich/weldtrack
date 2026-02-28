@@ -70,7 +70,7 @@ export function importData(json: string): void {
   if (data.planItems && Array.isArray(data.planItems)) {
     const existingPlan = get(planItems);
     const newPlan = data.planItems.filter(
-      (p: PlanItem) => !existingPlan.some((ep) => ep.article === p.article)
+      (p: PlanItem) => !existingPlan.some((ep) => ep.article === p.article && ep.startDate === p.startDate)
     );
     planItems.update((existing) => [...existing, ...newPlan]);
   }

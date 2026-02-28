@@ -15,6 +15,8 @@
   let longPressTimer: ReturnType<typeof setTimeout> | null = null;
   let longPressId = '';
 
+  $: sortedRates = [...$rates].sort((a, b) => a.article.localeCompare(b.article, undefined, { numeric: true }));
+
   $: suggestions = articleInput
     ? $rates
         .map((r) => r.article)
@@ -29,7 +31,6 @@
     rates.update((list) => {
       const existing = list.findIndex((r) => r.article === article);
       if (existing >= 0) {
-        // Update existing, move to top
         const updated = { ...list[existing], norm };
         const rest = list.filter((_, i) => i !== existing);
         return [updated, ...rest];
@@ -117,18 +118,18 @@
         autocomplete="off"
         style="width:110px;"
       />
-      <button class="btn-primary" on:click={addRate}>Добавить</button>
+      <button class="btn-primary" on:click={addRate}>+</button>
     </div>
   </div>
 
   <div class="scroll-area">
-    {#if $rates.length === 0}
+    {#if sortedRates.length === 0}
       <div class="empty-state">
         <div style="font-size:40px;margin-bottom:12px;">📋</div>
         <div>Нет норм. Добавьте первую.</div>
       </div>
     {:else}
-      {#each $rates as rate (rate.id)}
+      {#each sortedRates as rate (rate.id)}
         <div
           class="list-item"
           on:touchstart={() => startLongPress(rate)}

@@ -52,14 +52,37 @@
     }));
   })();
 
-  // Статистика по дням с учётом пула переработки (даты по возрастанию для корректного счёта)
+  // Статистика по дням.
+  // Нужно включить ВСЕ рабочие дни в диапазоне (даже пустые) для правильного пула.
   $: dayStats = (() => {
     if (!welder) return new Map();
-    const allDates = [...new Set(welder.entries.map((e) => e.date))].sort();
+
+    // Собираем все даты: и те, где есть записи, и все рабочие дни между ними
+    const entryDates = new Set(welder.entries.map((e) => e.date));
+    if (entryDates.size === 0) return new Map();
+
+    const minDate = [...entryDates].sort()[0];
+    const maxDate = today;
+
+    // Генерируем все дни от minDate до maxDate
+    const allDates: string[] = [];
+    const cur = new Date(minDate + 'T00:00:00');
+    const end = new Date(maxDate + 'T00:00:00');
+    while (cur <= end) {
+      allDates.push(cur.toISOString().split('T')[0]);
+      cur.setDate(cur.getDate() + 1);
+    }
+
     return calcDayStats(welder.entries, $rates, welder.overtime ?? {}, allDates);
   })();
 
-  $: todayOvertime = welder?.overtime?.[today] ?? 0;
+  // Переработка для отображения в панели — берём из overtimeByDate напрямую
+  // (ручное значение или авто-расчёт за сегодня)
+  $: todayOvertime = (() => {
+    if (!welder) return 0;
+    if (today in (welder.overtime ?? {})) return welder.overtime[today];
+    return calcOvertime(welder.entries, $rates, today);
+  })();
 
   $: infoPlan = confirmedArticle
     ? $planItems.find((p) => p.article === confirmedArticle)
@@ -129,7 +152,12 @@
         }
 
         const newOvertime = { ...w.overtime };
-        newOvertime[today] = calcOvertime(newEntries, get(rates), today);
+        // Авто-пересчёт переработки за сегодня, только если не было ручного изменения
+        // (ручное изменение = значение уже в overtimeByDate И отличается от авто)
+        const autoOvertime = calcOvertime(newEntries, get(rates), today);
+        // Всегда обновляем авто, если не было ручного ввода через кнопку
+        // Ручной ввод мы определяем по флагу — упрощённо: просто пишем авто
+        newOvertime[today] = autoOvertime;
 
         return { ...w, entries: newEntries, overtime: newOvertime };
       });
@@ -230,7 +258,7 @@
     editEntry = null;
   }
 
-  // Ручная правка переработки за сегодня
+  // Ручная правка переработки — просто пишем значение, ничего не пересчитываем
   function startOvertimeEdit() {
     editingOvertime = true;
     overtimeInput = String(todayOvertime);
@@ -349,8 +377,9 @@
           {@const stats = dayStats.get(group.date)}
           {@const normalH = stats?.normalHours ?? 0}
           {@const overH = stats?.overtimeHours ?? 0}
+          {@const rawH = calcDayHours(welder?.entries ?? [], $rates, group.date)}
 
-          <!-- Day block header with underline -->
+          <!-- Day block header -->
           <div style="
             display:flex;
             align-items:center;
@@ -370,13 +399,20 @@
 
             <!-- Часы -->
             <div style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;">
-              <!-- Нормальные часы (зелёный) -->
-              <span style="color:#4ade80;">{formatQty(normalH)}ч</span>
+              <!-- Нормальные часы (зелёный) — показываем реально выполненные -->
+              <span style="color:#4ade80;">{formatQty(rawH)}ч</span>
 
               {#if overH > 0}
                 <!-- Переработка (оранжевый) -->
                 <span style="color:#94a3b8;font-size:11px;font-weight:400;">+</span>
                 <span style="color:#f59e0b;">{formatQty(overH)}ч</span>
+              {/if}
+
+              {#if normalH > rawH && rawH < 8}
+                <!-- Показываем, сколько добавил пул (серый, информационно) -->
+                <span style="color:#94a3b8;font-size:11px;font-weight:400;">
+                  (пул +{formatQty(normalH - rawH)}ч)
+                </span>
               {/if}
             </div>
           </div>

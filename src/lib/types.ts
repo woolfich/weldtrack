@@ -10,6 +10,8 @@ export type PlanItem = {
   target: number;
   completed: number;
   locked: boolean;
+  startDate: string;
+  completedDate?: string | null;
 };
 
 export type WCEntry = {
